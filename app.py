@@ -23,7 +23,8 @@ st.set_page_config(
 def load_and_process_data(file_path):
     """Loads, cleans, and processes the data to generate RFM metrics."""
     # Load data
-    df = pd.read_csv(file_path, encoding='latin1')
+    # In your load_and_process_data function
+    df = pd.read_csv('data.zip', encoding='latin1', compression='zip')
     
     # Data Cleaning from the notebook
     df = df.dropna(subset=['CustomerID'])
@@ -187,4 +188,5 @@ elif page == "Predict New Customer":
         elif predicted_segment == 'At-Risk Customers':
             st.warning("Re-engage them! Send a personalized 'We miss you' email with a valuable offer.")
         else: # Hibernating / Lost
+
             st.error("Try to win them back with a high-value offer. If no response, reduce marketing.")
