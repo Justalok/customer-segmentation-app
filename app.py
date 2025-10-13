@@ -2,14 +2,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime as dt
-import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 import plotly.express as px
-
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -23,10 +20,9 @@ st.set_page_config(
 def load_and_process_data(file_path):
     """Loads, cleans, and processes the data to generate RFM metrics."""
     # Load data
-    # In your load_and_process_data function
-    df = pd.read_csv('data.zip', encoding='latin1', compression='zip')
+    df = pd.read_csv(file_path, encoding='latin1', compression='zip')
     
-    # Data Cleaning from the notebook
+    # Data Cleaning
     df = df.dropna(subset=['CustomerID'])
     df.drop_duplicates(inplace=True)
     df = df[df['Quantity'] > 0]
@@ -43,7 +39,7 @@ def load_and_process_data(file_path):
     })
     rfm.rename(columns={'InvoiceDate': 'Recency', 'InvoiceNo': 'Frequency', 'TotalPrice': 'MonetaryValue'}, inplace=True)
     
-    return rfm, df
+    return rfm
 
 @st.cache_resource
 def train_models(rfm_data):
@@ -51,10 +47,12 @@ def train_models(rfm_data):
     # Log Transform and Scale RFM data for clustering
     rfm_log = np.log1p(rfm_data)
     scaler = StandardScaler()
-    rfm_scaled = scaler.fit_transform(rfm_log)
+    scaler.fit(rfm_log) # Fit the scaler here
     
     # K-Means Clustering
     kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
+    # Important: Use the scaled data for clustering
+    rfm_scaled = scaler.transform(rfm_log)
     clusters = kmeans.fit_predict(rfm_scaled)
     rfm_data['Cluster'] = clusters
     
@@ -77,84 +75,120 @@ def train_models(rfm_data):
     
     return rf_model, scaler, rfm_data
 
-# --- Load and Train ---
+# --- Load Data and Train Models ---
 try:
-    rfm, original_df = load_and_process_data('data.csv')
+    rfm = load_and_process_data('data.zip')
     rf_model, scaler, rfm_with_clusters = train_models(rfm.copy())
 except FileNotFoundError:
-    st.error("Error: `data.csv` not found. Please make sure the data file is in the same directory as `app.py`.")
+    st.error("Error: `data.zip` not found. Please ensure the data file is in the same directory.")
     st.stop()
 
 # --- UI: Sidebar ---
-st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to", ["Project Overview", "Exploratory Data Analysis", "Customer Segments", "Predict New Customer"])
+st.sidebar.title("🛍️ Customer Segmentation App")
+st.sidebar.markdown("""
+This app analyzes customer transaction data to create **RFM** (Recency, Frequency, Monetary) segments. It also predicts which segment a new customer will belong to.
+""")
+st.sidebar.divider()
+
+# Initialize session state for page navigation
+if 'page' not in st.session_state:
+    st.session_state.page = 'segmentation'
+
+# Sidebar buttons to switch pages
+if st.sidebar.button("Segmentation Overview", use_container_width=True):
+    st.session_state.page = 'segmentation'
+if st.sidebar.button("Predict New Customer", use_container_width=True):
+    st.session_state.page = 'prediction'
+
 
 # --- UI: Main Content ---
 
-if page == "Project Overview":
-    st.title("🛍️ E-commerce Customer Segmentation")
-    st.markdown("""
-    This application analyzes customer transaction data to segment customers into distinct groups based on their purchasing behavior. 
-    - **Recency (R):** How recently a customer has made a purchase.
-    - **Frequency (F):** How often a customer makes a purchase.
-    - **Monetary (M):** How much money a customer spends.
+# Display Segmentation Overview Page
+if st.session_state.page == 'segmentation':
+    st.title("E-Commerce Customer Segmentation Report")
+    st.markdown("A complete overview of customer segments based on their purchase behavior.")
+
+    # --- Business Overview Metrics ---
+    st.header("Business Overview")
+    total_customers = len(rfm_with_clusters)
+    total_revenue = rfm_with_clusters['MonetaryValue'].sum()
+    avg_recency = rfm_with_clusters['Recency'].mean()
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Customers", f"{total_customers:,}")
+    col2.metric("Total Revenue", f"${total_revenue:,.0f}")
+    col3.metric("Average Recency", f"{avg_recency:.1f} days")
+    st.divider()
+
+    # --- Customer Segment Details ---
+    st.header("Our Customer Segments")
+    st.markdown("Based on their purchasing behavior (Recency, Frequency, Monetary), customers have been grouped into four distinct segments using K-Means clustering.")
     
-    We use **K-Means Clustering** to identify segments and a **Random Forest Classifier** to predict the segment for new customers.
-    """)
+    segment_profiles = rfm_with_clusters.groupby('Segment').agg(
+        Customer_Count=('Segment', 'count'),
+        Avg_Recency=('Recency', 'mean'),
+        Avg_Frequency=('Frequency', 'mean'),
+        Avg_Monetary=('MonetaryValue', 'mean')
+    ).reset_index()
+
+    segment_order = ["Champions", "Potential Loyalists", "At-Risk Customers", "Hibernating / Lost"]
     
-    st.header("Raw Data Snippet")
-    st.dataframe(original_df.head())
+    # Create 4 columns for the segments
+    cols = st.columns(4)
     
-    st.header("Calculated RFM Data")
-    st.dataframe(rfm.head())
+    for i, segment_name in enumerate(segment_order):
+        # Filter the DataFrame for the current segment
+        segment_data = segment_profiles[segment_profiles['Segment'] == segment_name].iloc[0]
+        
+        with cols[i]:
+            st.subheader(f"👥 {segment_name}")
+            st.metric("Customer Count", f"{int(segment_data['Customer_Count']):,}")
+            st.metric("Avg. Recency (days)", f"{segment_data['Avg_Recency']:.1f}")
+            st.metric("Avg. Frequency", f"{segment_data['Avg_Frequency']:.1f}")
+            st.metric("Avg. Monetary Value ($)", f"${segment_data['Avg_Monetary']:,.0f}")
+            
+    st.success("💡 **Key Takeaway**: 'Champions' are your most valuable customers. 'Hibernating' and 'At-Risk' customers represent key opportunities for re-engagement campaigns.")
+    st.divider()
 
-elif page == "Exploratory Data Analysis":
-    st.title("🔍 Exploratory Data Analysis (EDA)")
-    
-    st.header("RFM Variable Distributions (Before Scaling)")
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    sns.histplot(rfm['Recency'], bins=30, kde=True, ax=axes[0]).set_title('Recency Distribution')
-    sns.histplot(rfm['Frequency'], bins=30, kde=True, ax=axes[1]).set_title('Frequency Distribution')
-    sns.histplot(rfm['MonetaryValue'], bins=30, kde=True, ax=axes[2]).set_title('Monetary Value Distribution')
-    st.pyplot(fig)
+    # --- Visualizing the Segments ---
+    st.header("Visualizing the Segments")
+    fig_scatter = px.scatter(
+        rfm_with_clusters,
+        x='Recency',
+        y='Frequency',
+        size='MonetaryValue',
+        color='Segment',
+        hover_name=rfm_with_clusters.index,
+        title="RFM Segments (Size by Monetary Value)",
+        labels={'Recency': 'Recency (Days)', 'Frequency': 'Frequency (Purchases)'},
+        color_discrete_map={
+            'Champions': 'green',
+            'Potential Loyalists': 'blue',
+            'At-Risk Customers': 'orange',
+            'Hibernating / Lost': 'red'
+        }
+    )
+    fig_scatter.update_layout(height=500)
+    st.plotly_chart(fig_scatter, use_container_width=True)
+    st.info("ℹ️ **Insight**: This plot visually confirms our segments. Notice the cluster of highly frequent, high-spending customers ('Champions') with low recency (bottom-right).")
 
-    st.header("Correlation Between RFM Variables")
-    fig, ax = plt.subplots(figsize=(8, 6))
-    sns.heatmap(rfm.corr(), annot=True, cmap='coolwarm', fmt=".2f", ax=ax)
-    st.pyplot(fig)
-
-elif page == "Customer Segments":
-    st.title("📊 Customer Segments")
-
-    st.header("3D Scatter Plot of Customer Segments")
-    fig_3d = px.scatter_3d(rfm_with_clusters, x='Recency', y='Frequency', z='MonetaryValue',
-                           color='Segment', symbol='Segment',
-                           title='Customer Segments in 3D RFM Space')
-    fig_3d.update_layout(margin=dict(l=0, r=0, b=0, t=40))
-    st.plotly_chart(fig_3d, use_container_width=True)
-    
-    st.header("Segment Profiles")
-    segment_profiles = rfm_with_clusters.groupby('Segment').agg({
-        'Recency': 'mean',
-        'Frequency': 'mean',
-        'MonetaryValue': 'mean',
-        'Cluster': 'count'
-    }).rename(columns={'Cluster': 'Count'}).sort_values(by='MonetaryValue', ascending=False)
-    st.dataframe(segment_profiles)
-
-    st.header("Data with Assigned Segments")
-    st.dataframe(rfm_with_clusters.head())
-
-elif page == "Predict New Customer":
+# Display Prediction Page
+elif st.session_state.page == 'prediction':
     st.title("🔮 Predict New Customer Segment")
-    st.markdown("Enter a customer's RFM values to predict which segment they belong to.")
+    st.markdown("Enter a customer's RFM values below to predict their segment and get recommendations.")
     
-    st.sidebar.header("Customer Input")
-    recency = st.sidebar.number_input("Recency (days since last purchase)", min_value=1, max_value=500, value=30)
-    frequency = st.sidebar.number_input("Frequency (total number of purchases)", min_value=1, max_value=100, value=5)
-    monetary = st.sidebar.number_input("Monetary Value (total spent)", min_value=1.0, max_value=10000.0, value=500.0, format="%.2f")
-    
-    if st.button("Predict Segment"):
+    with st.form("prediction_form"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            recency = st.number_input("Recency (days since last purchase)", min_value=1, max_value=500, value=30)
+        with col2:
+            frequency = st.number_input("Frequency (total purchases)", min_value=1, max_value=100, value=5)
+        with col3:
+            monetary = st.number_input("Monetary Value (total spent)", min_value=1.0, value=500.0, format="%.2f")
+        
+        submitted = st.form_submit_button("Predict Segment", type="primary")
+
+    if submitted:
         # Create a DataFrame for the new customer
         new_customer_data = pd.DataFrame({
             'Recency': [recency],
@@ -162,12 +196,8 @@ elif page == "Predict New Customer":
             'MonetaryValue': [monetary]
         })
         
-        # Log transform and scale the data
-        new_customer_log = np.log1p(new_customer_data)
-        new_customer_scaled = scaler.transform(new_customer_log)
-        
-        # Predict the cluster
-        prediction = rf_model.predict(new_customer_scaled)
+        # Predict the cluster using the trained RandomForest model
+        prediction_raw = rf_model.predict(new_customer_data)
         
         # Map prediction to segment name
         segment_map = {
@@ -176,17 +206,16 @@ elif page == "Predict New Customer":
             2: 'At-Risk Customers',
             3: 'Hibernating / Lost'
         }
-        predicted_segment = segment_map[prediction[0]]
+        predicted_segment = segment_map[prediction_raw[0]]
         
         st.success(f"### This customer is a **{predicted_segment}**! 🎉")
         
         st.subheader("Actionable Recommendation:")
         if predicted_segment == 'Champions':
-            st.info("Reward them! Offer VIP perks and early access to new products.")
+            st.info("💡 **Action:** Reward them! Offer VIP perks, loyalty points, and early access to new products to maintain their loyalty.")
         elif predicted_segment == 'Potential Loyalists':
-            st.info("Nurture them. Offer a discount on their next purchase to build loyalty.")
+            st.info("💡 **Action:** Nurture them. Offer a discount on their next purchase or a subscription service to increase their frequency and build loyalty.")
         elif predicted_segment == 'At-Risk Customers':
-            st.warning("Re-engage them! Send a personalized 'We miss you' email with a valuable offer.")
+            st.warning("💡 **Action:** Re-engage them immediately! Send a personalized 'We miss you' email with a valuable, time-sensitive offer to win them back.")
         else: # Hibernating / Lost
-
-            st.error("Try to win them back with a high-value offer. If no response, reduce marketing.")
+            st.error("💡 **Action:** Try a high-value, one-time offer to win them back. If there's no response, reduce marketing spend on them to focus on other segments.")
