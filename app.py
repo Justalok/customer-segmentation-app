@@ -47,20 +47,19 @@ def train_models(rfm_data):
     # Log Transform and Scale RFM data for clustering
     rfm_log = np.log1p(rfm_data)
     scaler = StandardScaler()
-    scaler.fit(rfm_log) # Fit the scaler here
+    rfm_scaled = scaler.fit_transform(rfm_log) # Fit & transform the scaler here
     
     # K-Means Clustering
     kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
-    # Important: Use the scaled data for clustering
-    rfm_scaled = scaler.transform(rfm_log)
+    # Used the scaled data for clustering
     clusters = kmeans.fit_predict(rfm_scaled)
     rfm_data['Cluster'] = clusters
     
     # Define segment names based on cluster analysis
     segment_map = {
+        2: 'Champions',
         0: 'Potential Loyalists',
-        1: 'Champions',
-        2: 'At-Risk Customers',
+        1: 'At-Risk Customers',
         3: 'Hibernating / Lost'
     }
     rfm_data['Segment'] = rfm_data['Cluster'].map(segment_map)
@@ -152,15 +151,16 @@ if st.session_state.page == 'segmentation':
 
     # --- Visualizing the Segments ---
     st.header("Visualizing the Segments")
+
     fig_scatter = px.scatter(
         rfm_with_clusters,
         x='Recency',
         y='Frequency',
-        size='MonetaryValue',
         color='Segment',
         hover_name=rfm_with_clusters.index,
-        title="RFM Segments (Size by Monetary Value)",
-        labels={'Recency': 'Recency (Days)', 'Frequency': 'Frequency (Purchases)'},
+        hover_data=['MonetaryValue'],
+        title="RFM Segments",
+        labels={'Recency': 'Recency (Days)', 'Frequency': 'Frequency (Purchases)', 'MonetaryValue': 'Monetary Value ($)'},
         color_discrete_map={
             'Champions': 'green',
             'Potential Loyalists': 'blue',
@@ -201,9 +201,9 @@ elif st.session_state.page == 'prediction':
         
         # Map prediction to segment name
         segment_map = {
+            2: 'Champions',
             0: 'Potential Loyalists',
-            1: 'Champions',
-            2: 'At-Risk Customers',
+            1: 'At-Risk Customers',
             3: 'Hibernating / Lost'
         }
         predicted_segment = segment_map[prediction_raw[0]]
@@ -219,3 +219,5 @@ elif st.session_state.page == 'prediction':
             st.warning("💡 **Action:** Re-engage them immediately! Send a personalized 'We miss you' email with a valuable, time-sensitive offer to win them back.")
         else: # Hibernating / Lost
             st.error("💡 **Action:** Try a high-value, one-time offer to win them back. If there's no response, reduce marketing spend on them to focus on other segments.")
+
+#  python -m streamlit run app.py
